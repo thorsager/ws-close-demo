@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebSocket Error Tester</title>
+  <style>
+    body { font-family: monospace; max-width: 800px; margin: 20px auto; }
+    #log { background: #1e1e1e; color: #d4d4d4; padding: 10px; height: 480px; overflow: auto; white-space: pre-wrap; line-height: 1.4; }
+    .row { margin-bottom: 10px; }
+    input { padding: 4px; }
+    button { padding: 6px 12px; }
+    label { display: inline-block; width: 130px; }
+    .err { color: #f44747; }
+    .ok  { color: #6a9955; }
+    .info { color: #569cd6; }
+    .warn { color: #dcdcaa; }
+    .dim { color: #808080; }
+  </style>
+</head>
+<body>
+  <h1>WebSocket Error Tester</h1>
+  <p>
+    The server upgrades the connection, then checks business logic.
+    If a check fails, it closes with a custom code (4000-4999) and a JSON reason
+    that the browser exposes in <code>onclose</code>.
+  </p>
+
+  <div class="row">
+    <label>Simulated error:</label>
+    <select id="status">
+      <option value="">(none — normal echo connection)</option>
+      <option value="402">402 — Insufficient credits</option>
+      <option value="403">403 — Account suspended</option>
+      <option value="429">429 — Rate limited</option>
+      <option value="500">500 — Server error</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Custom message:</label>
+    <input id="message" type="text" placeholder="optional, overrides default">
+  </div>
+  <div class="row">
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+    <button onclick="clearLog()">Clear</button>
+    &nbsp;&nbsp;
+    <button onclick="send()">Send echo</button>
+    <input id="msg" type="text" value="hello">
+  </div>
+
+  <pre id="log"></pre>
+
+  <script>
+    let ws = null;
+
+    function log(msg, cls) {
+      const el = document.getElementById('log');
+      const span = document.createElement('span');
+      if (cls) span.className = cls;
+      span.textContent = `[${new Date().toISOString()}] ${msg}\n`;
+      el.appendChild(span);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('log').innerHTML = '';
+    }
+
+    function buildQuery() {
+      const params = new URLSearchParams();
+      const status = document.getElementById('status').value;
+      const message = document.getElementById('message').value.trim();
+      if (status) params.set('status', status);
+      if (message) params.set('message', message);
+      const qs = params.toString();
+      return qs ? '?' + qs : '';
+    }
+
+    function parseReason(reason) {
+      if (!reason) return '(empty)';
+      try {
+        return JSON.stringify(JSON.parse(reason), null, 2);
+      } catch {
+        return reason;
+      }
+    }
+
+    function connect() {
+      disconnect();
+      const query = buildQuery();
+      const wsUrl = `ws://${location.host}/ws${query}`;
+
+      log(`WebSocket attempt: ${wsUrl}`, 'info');
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        log('WS OPEN:    connection established', 'ok');
+      };
+
+      ws.onmessage = (e) => {
+        log(`WS MESSAGE: ${e.data}`);
+      };
+
+      ws.onerror = () => {
+        log('WS ERROR:   fired', 'err');
+      };
+
+      ws.onclose = (e) => {
+        log('WS CLOSE:', 'info');
+        log(`  code:     ${e.code}`, e.wasClean ? 'ok' : 'err');
+        log(`  reason:   ${parseReason(e.reason)}`, 'warn');
+        log(`  wasClean: ${e.wasClean}`, e.wasClean ? 'ok' : 'err');
+
+        if (e.code >= 4000) {
+          log('', '');
+          log('>>> Business logic can read this close code + reason!', 'ok');
+          try {
+            const detail = JSON.parse(e.reason);
+            log(`>>> httpStatus=${detail.httpStatus} message="${detail.message}"`, 'ok');
+          } catch {}
+        }
+      };
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+        log('Disconnected manually', 'info');
+      }
+    }
+
+    function send() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('Not connected', 'err');
+        return;
+      }
+      const msg = document.getElementById('msg').value;
+      ws.send(msg);
+      log(`SENT: ${msg}`, 'info');
+    }
+  </script>
+</body>
+</html>
